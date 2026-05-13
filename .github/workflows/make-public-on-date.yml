@@ -1,0 +1,53 @@
+# Workflow: make repository public on a scheduled date
+# This runs daily and flips the repository to public on or after the TARGET_DATE.
+# Requires a repository secret `GH_PAT` (Personal Access Token with `repo` scope).
+
+name: Make repository public (manual)
+
+on:
+  # Manual trigger only: requires a confirmation input to proceed
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type YES to confirm making the repository public'
+        required: true
+        default: 'NO'
+
+jobs:
+  make-public:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm approval
+        id: confirm
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "YES" ]; then
+            echo "Confirmation not provided or not YES. Aborting." >&2
+            exit 1
+          fi
+
+      - name: Make repository public
+        env:
+          REPO: ${{ github.repository }}
+          TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          echo "Making $REPO public..."
+          RESPONSE=$(curl -s -X PATCH -H "Authorization: token $TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$REPO" -d '{"private":false}')
+          echo "$RESPONSE" | jq -r '.message, .private' || true
+          IS_PRIVATE=$(echo "$RESPONSE" | jq -r '.private')
+          if [ "$IS_PRIVATE" = "true" ]; then
+            echo "Failed to change visibility" >&2
+            exit 1
+          fi
+
+      - name: Create a release (optional)
+        env:
+          REPO: ${{ github.repository }}
+          TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          TAG="v1.0.0"
+          BODY="Release: repository made public and ready for students."
+          echo "Creating release $TAG..."
+          curl -s -X POST -H "Authorization: token $TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$REPO/releases" \
+            -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\",\"body\":\"$BODY\",\"prerelease\":false}" || true
